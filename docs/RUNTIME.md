@@ -30,23 +30,26 @@ JSON-схему ответа. Сервис запускает агента с т
 
 Разделение ролей:
 
-```
-backtest-kit                         agent-runtime                   Ollama
-──────────────                       ─────────────                   ──────
-getSignal(symbol, when)
-  │ Dataset.getArticle(when)
-  │   → { messages }
-  ▼
-agent-runtime-sdk
-generateObject({ messages,  ──────►  POST /api/v1/inference
-                 format,              воркспейс ← файлы, картинки
-                 instructions })      системный промпт + схема
-                                      цикл агента ─────────────────► gemma4:31b-cloud
-                                        bash / view_image ◄─────────── tool calls
-                                        provide_answer → валидация
-                                      SQLite: транскрипт, вложения
-  ◄──────────────────────────────── 200 { data } | 500 { error }
-решение стратегии
+```mermaid
+flowchart LR
+    subgraph BK["backtest-kit"]
+        GS["getSignal(symbol, when)"] --> DS["Dataset.getArticle(when)<br/>→ messages"]
+        DS --> SDK["agent-runtime-sdk<br/>generateObject({ messages, format, instructions })"]
+        SDK --> DEC["решение стратегии"]
+    end
+    subgraph AR["agent-runtime"]
+        API["POST /api/v1/inference"] --> WS["воркспейс: файлы, картинки<br/>системный промпт + схема"]
+        WS --> LOOP["цикл агента"]
+        LOOP --> VAL["provide_answer → валидация ajv"]
+        VAL --> DB["SQLite: транскрипт, вложения"]
+    end
+    subgraph OL["Ollama"]
+        M["gemma4:31b-cloud"]
+    end
+    SDK -- "HTTP, ждёт завершения" --> API
+    LOOP -- "сообщения + tools" --> M
+    M -- "tool calls: bash, view_image, provide_answer" --> LOOP
+    DB -- "200 с data или 500 с error" --> SDK
 ```
 
 backtest-kit отвечает за время (`when`), свечи, отсутствие look ahead и
@@ -67,21 +70,27 @@ backtest-kit отвечает за время (`when`), свечи, отсутс
    последнее сообщение не от `user`, добавляется «Proceed with the task.».
 3. **Системный промпт** рендерится из `assets/system.mustache`: путь к папке,
    список файлов и картинок, схема ответа, правила, поле `instructions` из
-   запроса как раздел «Additional instructions».
+   запроса как раздел «Additional instructions». Среди правил: `null` это
+   JSON null, а не строка; при `oneOf` выбирается ровно одна ветка; `const`
+   копируется дословно; лишние свойства запрещены.
 4. **Цикл агента.** Модель вызывает инструменты, пока не вызовет
-   `provide_answer` с валидными аргументами. Инструментальные вызовы после
-   принятого ответа блокируются.
+   `provide_answer` с валидными аргументами. Аргументы проверяет ajv по
+   исходной схеме `format`; для pi-agent-core инструмент объявлен с
+   разрешающей схемой, чтобы его скупые сообщения об ошибках не подменяли
+   ajv. Вызовы инструментов после принятого ответа блокируются.
 5. **Повторы.** Если попытка закончилась без принятого ответа, в ту же
    переписку добавляется требование вызвать `provide_answer` и модель
-   спрашивается снова, до `MAX_ATTEMPTS` раз. При отказе валидатора в деталях
-   остаётся причина (например `sentiment: expected one of [...]`).
+   спрашивается снова, до `MAX_ATTEMPTS` раз. Текст валидатора уходит модели
+   как результат инструмента и остаётся в деталях ошибки, например
+   `signal.direction: must be exactly "long"`.
 6. **Сохранение.** Файлы, созданные агентом, транскрипт, картинки, запрос и
    результат пишутся в SQLite. Папка очищается.
 
-Коды ошибок (HTTP 500, тело `{ status: "error", error: { code, message, details } }`):
+Коды ошибок (тело `{ status: "error", error: { code, message, details } }`, HTTP 500, кроме `invalid_format`):
 
 | Код | Когда | Что делать |
 |---|---|---|
+| `invalid_format` | HTTP 400 до инференса: схема `format` не компилируется, например `$ref` на отсутствующий `$defs`; запись в базе не создаётся | исправить схему, текст ajv в `message` |
 | `schema_mismatch` | за `MAX_ATTEMPTS` попыток не было валидного `provide_answer` | уточнить `description` полей, проверить `enum`, упростить схему, посмотреть транскрипт |
 | `max_turns` | модель сделала `MAX_TURNS` вызовов без ответа | модель зациклилась на `bash`; сократить задачу или запретить расчёты в инструкциях |
 | `timeout` | превышен `INFERENCE_TIMEOUT_MS` | медленная модель или длинная задача |
@@ -134,10 +143,12 @@ curl -s http://localhost:10050/api/v1/health | jq
 
 Отличие нашего `.env.example` от эталонного в репозитории agent-runtime: там
 дополнительно задано `OLLAMA_THINK=false`, у нас переменная не задана, значит
-режим размышления остаётся на усмотрение модели. Остальные настройки
+режим размышления остаётся на усмотрение модели; все проверки схем агентов
+мейнтейнер гонял с `OLLAMA_THINK=false`. Остальные настройки
 (`MAX_ATTEMPTS`, `MAX_TURNS`, `INFERENCE_TIMEOUT_MS`, `OLLAMA_NUM_CTX`,
-`OLLAMA_TEMPERATURE`, логирование) берутся по умолчанию и при необходимости
-дописываются в `.env`. Полный список в README agent-runtime, раздел Configuration.
+`OLLAMA_TEMPERATURE`, `MODEL_SCHEMA_REF_DEPTH`, логирование) берутся по
+умолчанию и при необходимости дописываются в `.env`. Полный список в README
+agent-runtime, раздел Configuration.
 
 Проверка на реальной записи датасета одним запросом:
 
@@ -162,68 +173,65 @@ curl -s -X POST http://localhost:10050/api/v1/inference \
 
 ## 4. Вызов из стратегии
 
-Клиент: пакет [agent-runtime-sdk](https://www.npmjs.com/package/agent-runtime-sdk)
-(в npm версия 0.1.0), типизированный `generateObject` / `generateText` поверх
-`fetch`. Тип ответа выводится из схемы: `enum` становится union, `required`
-определяет обязательные ключи. В проект пока не установлен:
+Клиент: пакет [agent-runtime-sdk](https://www.npmjs.com/package/agent-runtime-sdk),
+типизированный `generateObject` / `generateText` поверх `fetch`. Нужна версия
+0.2.0: в ней `format` это полная JSON Schema 2020-12, и тип ответа выводится из
+неё целиком (абзац «Схема и типы» ниже). На момент написания 0.2.0 собрана в
+рабочем дереве agent-runtime и в npm не опубликована, там лежит 0.1.0 с
+урезанным подмножеством. В проект пакет пока не установлен:
 
 ```bash
-npm i agent-runtime-sdk undici
+npm i agent-runtime-sdk@^0.2 undici
 ```
 
 `undici` нужен для dispatcher без таймаутов, у SDK он опциональная peer-зависимость.
 
-Минимальный агент 1 из AGENT.md в терминах backtest-kit:
+Агент 1 из AGENT.md в терминах backtest-kit. Схема агента лежит в проекте одним
+литералом `defineFormat` (почему не JSON, см. «Схема и типы» ниже):
 
 ```ts
 import { addStrategySchema, Cache } from "backtest-kit";
-import { generateObject, defineFormat, type InferFormat } from "agent-runtime-sdk";
+import { generateObject, type InferFormat } from "agent-runtime-sdk";
 import { Agent } from "undici";
-import { Dataset } from "../classes/Dataset"; // путь зависит от расположения стратегии
+import { readFile } from "fs/promises";
+import { Dataset } from "../classes/Dataset";           // пути зависят от расположения стратегии
+import { Agent1Format } from "../schemas/agent1.format"; // схема агента 1 из AGENT.md со вклеенными $defs предиката
 
-// Один dispatcher на процесс: инференс идёт минутами, встроенный fetch обрывает его через 300 с
+// Один dispatcher на процесс: встроенный fetch обрывает запрос без ответа через 300 с
 const dispatcher = new Agent({ headersTimeout: 0, bodyTimeout: 0 });
 
-const ClaimFormat = defineFormat({
-  type: "object",
-  required: ["has_claim", "direction", "evidence_quote", "reasoning"],
-  properties: {
-    has_claim: { type: "boolean", description: "В обзоре есть фальсифицируемое утверждение о последующем движении цены" },
-    direction: { type: "string", enum: ["up", "down", "none"], description: "Направление ожидаемого движения, none если утверждения нет" },
-    evidence_quote: { type: "string", description: "Дословная цитата из обзора, на которой основано утверждение. Пустая строка, если утверждения нет" },
-    reasoning: { type: "string", description: "Почему принято такое решение, для отладки" },
-  },
-});
+type Agent1Response = InferFormat<typeof Agent1Format>;
+// verdict: "summary_only" | "forecast_not_expressible" | "forecast_expressible"
+// signal: null | { direction: "long"; asset: "BTC"; entry: Predicate; invalidation: Predicate; ... }
 
-type Claim = InferFormat<typeof ClaimFormat>; // direction: "up" | "down" | "none"
-
-const getClaim = Cache.file(
+const getAgent1 = Cache.file(
   async (symbol: string, when: Date) => {
     const article = await Dataset.getArticle(when);
     if (!article) {
-      return { claim: null };
+      return { answer: null };
     }
-    const claim: Claim = await generateObject(
+    const answer: Agent1Response = await generateObject(
       {
-        messages: article.messages,             // запись датасета как есть, с картинками
-        instructions: `Инструмент: ${symbol}. Отвечай на русском языке.`,
-        format: ClaimFormat,
+        messages: article.messages,                                   // запись датасета как есть, с картинками
+        instructions: await readFile("./prompts/agent1.md", "utf-8"), // системный промпт агента 1 из AGENT.md
+        format: Agent1Format,
       },
-      { dispatcher },                           // baseUrl по умолчанию AGENT_RUNTIME_URL или http://localhost:10050
+      { dispatcher },                                                 // baseUrl: AGENT_RUNTIME_URL или http://localhost:10050
     );
-    return { claim, articleId: article.id, publishedAt: article.publishedAt };
+    return { answer, articleId: article.id, publishedAt: article.publishedAt };
   },
-  { interval: "1d", name: "news_claim_v1" },
+  { interval: "1d", name: "agent1_v1" },
 );
 
 addStrategySchema({
   strategyName: "news_claims",
   getSignal: async (symbol, when, currentPrice) => {
-    const { claim, articleId, publishedAt } = await getClaim(symbol, when);
-    if (!claim || !claim.has_claim || claim.direction === "none") {
+    const { answer, publishedAt } = await getAgent1(symbol, when);
+    if (!answer || answer.signal === null) {
       return null;
     }
-    // дальше по AGENT.md: предикат входа, агент 2, агент 3
+    // здесь answer.signal типизирован как объект: direction "long", предикаты entry и invalidation
+    // дальше пост-валидация харнессом (раздел 5) и агенты 2, 3 по AGENT.md
     return null;
   },
 });
@@ -235,7 +243,7 @@ addStrategySchema({
 |---|---|---|
 | Роль и правила агента (системный промпт из AGENT.md) | `instructions` | попадает в системный промпт разделом «Additional instructions» |
 | Текст и картинки обзора | `messages` | это и есть запись датасета |
-| Схема ответа | `format` через `defineFormat` | литералы `enum` сохраняются в типе, каст `<Position> entry.position` из референса не нужен |
+| Схема ответа | `format` через `defineFormat`, вся схема одним литералом в `.ts` | тип ответа выводится из схемы: `enum` и `const` остаются литералами, `signal` получает `\| null`; импорт из `.json` расширил бы их до `string` |
 | Модель | не передавать | задаётся на сервере в `.env`; поле `model` только для разовых экспериментов |
 
 Ошибки. `generateObject` бросает `AgentRuntimeError` с полями `code`, `details`
@@ -257,31 +265,40 @@ const entry = await generateObject({ format, messages }, { dispatcher });
 Разница в типе ответа: у json-inference со `satisfies FormatModel` enum
 расширяется до `string`, у SDK с `defineFormat` остаётся union.
 
-**Подмножество JSON Schema.** `format` это не произвольная JSON Schema, а
-`FormatModel` из json-inference. Валидатор на сервере (`validateToolArguments`)
-и типы SDK (`FormatProperty`) понимают только это:
+**Схема и типы.** `format` это JSON Schema draft 2020-12 с объектом на верхнем
+уровне. Сервер компилирует её ajv (`strict` выключен, `strictSchema: "log"`:
+предупреждения о неизвестных ключах уходят в `debug.log`) и проверяет
+аргументы `provide_answer` по исходной схеме на любую глубину. Поддерживаются
+`oneOf`, `anyOf`, `allOf`, `if`/`then`/`else`, `const`, `enum` любых типов,
+`type` массивом с `"null"`, `additionalProperties`, `pattern`,
+`minLength`/`maxLength`, `minimum`/`maximum`, `prefixItems`, рекурсия через
+`$defs` и `$ref`. Ограничение одно: `$ref` только локальные, `#/$defs/...`,
+внешние `$id` не разрешаются. `$schema`, `$id`, `title` допустимы и
+игнорируются. Схема, которая не компилируется, даёт 400 `invalid_format` до
+инференса.
 
-| Ключ | Где допустим |
-|---|---|
-| `type` | одно из `string`, `number`, `integer`, `boolean`, `array`, `object`; строка, не массив |
-| `description` | обязателен у каждого свойства (тип SDK), у `items` необязателен |
-| `enum` | только для `type: "string"` |
-| `items`, `minItems`, `maxItems` | для `array` |
-| `required`, `properties` | для `object`, вложенность без ограничений |
+Модели схема уходит в производном виде: без `$schema`, `$id`, `title`,
+`examples`, `default`, с `$ref`, раскрытыми на глубину `MODEL_SCHEMA_REF_DEPTH`
+(по умолчанию 3, на срезе остаётся `description`). На `gemma4:31b-cloud`
+схема агента 1 проходит и без раскрытия (`0`): 4,5 КБ параметров инструмента
+против 6,1 КБ. Значение `3` оставлено ради локальных моделей, на которых
+`$ref` не проверялся.
 
-Нет `oneOf`, `anyOf`, `allOf`, `if`/`then`, `const`, `$ref`, `$defs`,
-`additionalProperties`, `minLength`, `maxLength`, `pattern`, типа `null` и
-записи `type: ["string", "null"]`. Поведение при их появлении:
+Тип ответа в SDK выводится из той же схемы: `InferFormat<typeof F, Depth = 6>`.
+Порядок разбора: `$ref`, затем `const`, `enum`, `oneOf`/`anyOf` (union веток),
+`allOf` (пересечение), массив типов (`["string", "null"]` даёт `string | null`),
+скаляры, массив, объект; `if`/`then` на тип не влияют. По `$ref` вывод идёт на
+`Depth` уровней, глубже тип `unknown`: для предиката AGENT.md это пять
+вложенных `all`/`any`/`not` с точными типами листьев. Предел поднимается
+вторым параметром, `InferFormat<typeof F, 10>`. Решение мейнтейнера: контракт
+это одна схема в одном `defineFormat`, без второго типа, написанного руками.
+Для схемы агента 1 целиком это 34 тысячи инстанциаций и 0,14 с работы `tsc`.
 
-- запрос проходит: Fastify-схема `format` разрешает лишние ключи;
-- валидатор молча пропускает свойство, у которого нет строкового `type`, и не
-  знает остальных ключей, то есть ограничение не проверяется вовсе;
-- TypeScript отвергает такую схему в `defineFormat` как лишние свойства
-  литерала, а при касте выводит `unknown` для поля.
-
-Модель видит схему целиком в системном промпте и может следовать ей, но
-гарантий это не даёт. Всё, что не входит в подмножество, переносится в
-пост-валидацию харнесса.
+Следствие для хранения схем: литералы `enum`, `const` и `required`
+сохраняются только у литерала в `.ts`. Импорт из `.json` расширяет их до
+`string` и `string[]`, и `signal` перестаёт быть `| null`. Поэтому схемы в
+проекте лежат как `schemas/*.format.ts` с `defineFormat`, а JSON из AGENT.md
+служит источником для их генерации.
 
 ## 5. На что обратить внимание при переносе стратегии
 
@@ -301,8 +318,10 @@ const entry = await generateObject({ format, messages }, { dispatcher });
 - Смена схемы, промпта или инструкций требует нового `name`
   (`news_claim_v1` → `news_claim_v2`), иначе подмешаются кэшированные ответы
   старой формы. README референса говорит об этом прямо.
-- На весь датасет приходится 698 обзоров, инференс занимает от десятков секунд
-  до минут и исполняется по одному. Первый прогон это часы, остальные читают кэш.
+- На весь датасет приходится 698 обзоров, инференсы исполняются по одному. На
+  схеме агента 1 ответ приходит одним ходом за 2–4 с, при вызовах `bash` и
+  повторах это минуты. Первый прогон это от получаса до часов, остальные
+  читают кэш.
 
 **Look ahead закрывается до вызова модели.** Референс отдаёт модели только
 посты, опубликованные не позже `when` (`scrapeLookback`), а после ответа ещё
@@ -320,28 +339,39 @@ const entry = await generateObject({ format, messages }, { dispatcher });
 дословно встречаться в тексте обзора, это «сверка эха» из AGENT.md раздел 11.
 Правило общее: всё, что харнесс знает сам, он проверяет, а не доверяет модели.
 
-**Схемы AGENT.md в подмножество не укладываются.** Схемы ответов агентов 1, 2
-и 3 и схема предиката написаны на полном JSON Schema 2020-12: `signal` как
-`oneOf: [null, object]`, `type: ["string", "null"]`, `enum` без `type`,
-`const`, `allOf` с `if`/`then`, `additionalProperties: false`, `minLength`,
-`maxLength`, `pattern`, рекурсивный предикат через `$defs` и `$ref`. Ни один
-из этих ключей валидатор не проверяет, а SDK не типизирует (см. раздел 4).
-Перед реализацией схемы переписываются:
+**Схемы AGENT.md проходят без правок.** Схемы агентов 1, 2, 3 с `oneOf` для
+`signal`, nullable-полями, `const`, `allOf` с `if`/`then`,
+`additionalProperties: false`, `pattern` и рекурсивным предикатом принимаются
+сервером дословно и проверяются целиком, см. раздел 4. Единственная правка
+техническая: схема агента 1 ссылается на внешний файл
+`predicate.schema.json#/$defs/predicate`, а сервер разрешает только локальные
+`$ref`, поэтому `$defs` предиката вклеиваются в схему агента, а ссылки
+переписываются на `#/$defs/predicate`. Склеенные схемы всех трёх агентов уже
+лежат в репозитории agent-runtime в `demo/fixtures/*.schema.json`, схема
+агента 1 как литерал `defineFormat` в `packages/sdk/test/agent1.format.ts`
+(282 строки); оттуда она копируется в `schemas/agent1.format.ts` проекта.
 
-- «нет сигнала» выражается маркерами, как в референсе (`id: -1`,
-  `position: "wait"`, `targets: []`): либо `verdict` в `enum` плюс объект
-  `signal` вне `required`, согласованность которых проверяет харнесс, либо
-  флаг `has_claim` с пустыми значениями, как в примере раздела 4;
-- `type: ["string", "null"]` становится `type: "string"` с пустой строкой как
-  маркером, `const` становится `enum` из одного значения, `enum` получает
-  `type: "string"`;
-- `additionalProperties`, `minLength`, `maxLength`, `pattern`, `if`/`then`
-  уходят в пост-валидацию харнесса, которая в AGENT.md и так предусмотрена;
-- рекурсивное дерево предиката (`all`/`any`/`not` через `$ref`) в подмножестве
-  не выражается. Варианты: фиксированная глубина (объект с полями
-  `all: leaf[]`, `any: leaf[]`), плоский список листьев с `op` в `enum`, либо
-  строковый DSL, который разбирает и проверяет харнесс. Выбор за автором
-  конвейера.
+Проверено мейнтейнером на `gemma4:31b-cloud`. Восемь синтетических случаев
+(nullable, `oneOf` с `null`, нарушения `const`, `additionalProperties`,
+`pattern`, `if`/`then`, рекурсивный предикат в четыре уровня, невалидный
+`$ref`) проходят при обоих значениях `MODEL_SCHEMA_REF_DEPTH`. Схема агента 1
+с системным промптом из AGENT.md на четырёх статьях датасета, две из них ещё и
+без картинок, дала шесть ответов с первого хода без отклонённых вызовов, по
+2,4–3,8 с каждый: три `summary_only`, один `forecast_not_expressible` с двумя
+claims и `signal: null` по правилу «только long». Golden-фикстуры A и B
+проходят схему на уровне валидатора; на модели их прогнать нельзя, обзоры
+22.10.2026 и 23.10.2026 в датасет не входят (он заканчивается 2026-10-02).
+Для ветки с непустым `signal` мейнтейнер добавил синтетическую фикстуру C
+(`demo/fixtures/agent1.synthetic-c.article.txt` и `agent1.fixture-c.json`):
+модель выдала сигнал с теми же уровнями с первого вызова.
+
+**Пост-валидация остаётся за стратегией.** Схема не проверяет дословность
+`evidence_quote`, происхождение числовых литералов предикатов из текста,
+глубину и число листьев, связь `based_on_claim_ids` с нужными claims.
+Референсная реализация этих проверок из AGENT.md разделов 3 и 5 лежит в
+agent-runtime в `demo/agent1.check.ts`: на испорченной фикстуре C
+(перефразированная цитата, down-claim как основание, выдуманный уровень,
+глубина 4) схема проходит, а пост-валидация ловит все четыре дефекта.
 
 **Поле `reasoning` и отладка.** Референс требует от модели `reasoning` и кладёт
 его в `note` сигнала. С agent-runtime полный транскрипт каждого инференса
@@ -352,11 +382,12 @@ const entry = await generateObject({ format, messages }, { dispatcher });
 **Картинки.** Референс картинки постов модели не отдаёт (`omit(message, "photo")`).
 В нашем датасете графики это 98 % объёма записи. При `OLLAMA_VISION=1` они
 уходят модели и увеличивают время ответа и расход токенов. Если агенту 1
-нужен только текст, передавать `messages` без `images`; решение принимается по
-результатам на golden-фикстурах из AGENT.md раздел 9.
+нужен только текст, передавать `messages` без `images`. На двух статьях
+датасета ответ агента 1 без картинок совпал с ответом с картинками;
+окончательное решение по результатам на фикстурах.
 
-**Таймауты и параллельность.** Один инференс за раз на сервере, минуты на
-ответ. Бэктест по нескольким символам отправит запросы параллельно, они
+**Таймауты и параллельность.** Один инференс за раз на сервере, от секунд до
+минут на ответ. Бэктест по нескольким символам отправит запросы параллельно, они
 выстроятся в очередь, и `getSignal` будет ждать. Клиент обязан быть без
 таймаута (dispatcher), сервер ограничен `INFERENCE_TIMEOUT_MS`.
 
@@ -381,6 +412,7 @@ grep '<inference id>' docker/agent/logs/debug.log | jq -c '.args'
 ## 7. Ссылки
 
 - [agent-runtime](https://github.com/tripolskypetr/agent-runtime): README с API, конфигурацией и логированием
+- agent-runtime, папка `demo/`: склеенные схемы агентов `fixtures/*.schema.json`, фикстуры A, B, C, пост-валидация `agent1.check.ts`, smoke-тесты схем (`npm run test:schema`, `npm run smoke:schema`)
 - [agent-runtime-sdk](https://github.com/tripolskypetr/agent-runtime/tree/master/packages/sdk): README клиента, вывод типов, обработка ошибок
 - [json-inference](https://github.com/tripolskypetr/json-inference): формат схем `FormatModel`
 - [AGENT.md](AGENT.md): конвейер из трёх агентов, схемы ответов, фикстуры
