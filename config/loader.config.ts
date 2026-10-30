@@ -7,10 +7,16 @@ import {
 } from "backtest-kit";
 import { errorData, getErrorMessage } from "functools-kit";
 
-Launcher.run();
+const ROOT_PATH_SYMBOL = Symbol.for("root_path");
 
 setConfig({
   CC_LAUNCHER_CANDLE_CACHE_DEFAULT: false,
+});
+
+Launcher.run();
+
+Object.assign(globalThis, {
+  [ROOT_PATH_SYMBOL]: process.cwd(),
 });
 
 listenError((error) => {
