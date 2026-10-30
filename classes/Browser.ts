@@ -399,7 +399,7 @@ const walk = async ($: CheerioAPI, container: Cheerio<AnyNode>, d: Draft, pageUr
     }
 };
 
-export interface ParseOptions {
+interface ParseOptions {
     /** Адрес страницы для относительных ссылок, если в разметке нет canonical */
     pageUrl?: string;
     /** Картинка байтами по абсолютному адресу; ImageTooLarge пропускает её, остальные ошибки роняют статью */
@@ -407,7 +407,7 @@ export interface ParseOptions {
 }
 
 /** Первая статья ленты: карточки article.pcard идут от самой свежей */
-export const firstArticleUrl = (html: string, base: string): string => {
+const firstArticleUrl = (html: string, base: string): string => {
     const $ = cheerio.load(html);
     const href = $(".era-feed article a[href], article.pcard a[href]").first().attr("href");
     if (!href) {
@@ -447,7 +447,7 @@ export const firstArticleUrl = (html: string, base: string): string => {
  *
  * У анонима тело статьи пустое и скрыто (hidden), это признак пейволла.
  */
-export const parseArticle = async (html: string, options: ParseOptions): Promise<Article> => {
+const parseArticle = async (html: string, options: ParseOptions): Promise<Article> => {
     const $ = cheerio.load(html);
     const pageUrl = $('link[rel="canonical"]').attr("href") || options.pageUrl || BASE_URL;
 
@@ -519,7 +519,7 @@ const readArticle = queued(async (self: BrowserUtils, url?: string): Promise<Art
 
 /* ------------------------------------------------------------------ браузер */
 
-export class BrowserUtils {
+class BrowserUtils {
 
     private _context: BrowserContext | null = null;
 

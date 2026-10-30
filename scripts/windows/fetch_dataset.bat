@@ -3,7 +3,7 @@ setlocal
 rem Downloads wwwroot.zip from Hugging Face and extracts wwwroot.jsonl into .\assets
 rem
 rem Usage:
-rem   scripts\windows\fetch_articles.bat
+rem   scripts\windows\fetch_dataset.bat
 rem
 rem Environment:
 rem   FORCE=1     re-download even if assets\wwwroot.jsonl already exists

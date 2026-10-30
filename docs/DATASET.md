@@ -44,8 +44,8 @@
 ## 2. Скачивание
 
 Два скрипта с одинаковой схемой работы:
-[scripts/linux/fetch_articles.sh](../scripts/linux/fetch_articles.sh) для Linux и macOS,
-[scripts/windows/fetch_articles.bat](../scripts/windows/fetch_articles.bat) для Windows.
+[scripts/linux/fetch_dataset.sh](../scripts/linux/fetch_dataset.sh) для Linux и macOS,
+[scripts/windows/fetch_dataset.bat](../scripts/windows/fetch_dataset.bat) для Windows.
 Запускать можно из любой папки: пути считаются от расположения скрипта
 (`scripts/<os>/../..` это корень проекта).
 

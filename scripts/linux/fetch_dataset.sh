@@ -2,7 +2,7 @@
 # Downloads wwwroot.zip from Hugging Face and extracts wwwroot.jsonl into ./assets
 #
 # Usage:
-#   ./scripts/linux/fetch_articles.sh
+#   ./scripts/linux/fetch_dataset.sh
 #
 # Environment:
 #   FORCE=1     re-download even if assets/wwwroot.jsonl already exists
