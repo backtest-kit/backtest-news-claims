@@ -45,3 +45,6 @@ build/*
 # Other
 error.txt
 session.txt
+
+# Browser session (cookies) for eraperemen.info
+.era-profile
