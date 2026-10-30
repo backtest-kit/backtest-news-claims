@@ -1,7 +1,7 @@
 import { singleshot } from "functools-kit";
 import { createReadStream } from "fs";
 import { open } from "fs/promises";
-import { get } from "lodash";
+import { get } from "lodash-es";
 import { join } from "path";
 
 const DATASET_ASSETS_PATH = "./assets/wwwroot.jsonl";

@@ -5,7 +5,7 @@ import type { Cheerio, CheerioAPI } from "cheerio";
 import type { AnyNode, Element, Text } from "domhandler";
 import { randomUUID } from "crypto";
 import { join, resolve as resolvePath } from "path";
-import { get } from "lodash";
+import { get } from "lodash-es";
 
 /** Профиль Chromium с сессией сайта: создаётся signIn, переиспользуется getArticle */
 const PROFILE_ASSETS_PATH = "./.era-profile";
@@ -37,7 +37,10 @@ const ROLE = "user";
 const DATE_FORMAT = "dd.mm.yyyy";
 /** На странице нет времени публикации, только дата; полночь в часовом поясе сайта, как в wwwroot.jsonl */
 const SITE_TZ_OFFSET = "+03:00";
-/** Обложка это фото на ~2 МБ без аналитической ценности, графики 25-360 КБ; порог разделяет их с запасом */
+/**
+ * Любая картинка тяжелее порога отсекается, обложка тоже. Обложка обычно это фото
+ * на ~2 МБ без аналитической ценности, графики в wwwroot.jsonl от 6 до 978 КБ.
+ */
 const MAX_IMAGE_BYTES = 1024 * 1024;
 const IMAGE_CACHE_SIZE = 200;
 
@@ -416,10 +419,23 @@ export const firstArticleUrl = (html: string, base: string): string => {
 /**
  * HTML статьи -> запись в формате wwwroot.jsonl.
  *
+ * Стандарт строки, снятый со всех 698 записей датасета:
+ *   messages[0].content   "# Обзор рынка криптовалют dd.mm.yyyy" + пустая строка +
+ *                         "Дата: dd.mm.yyyy", "Рубрика: <бейдж>" (если есть), "Источник: <canonical>";
+ *                         если тело начинается с таблицы метрик, она идёт в это же сообщение
+ *   messages[0].images    обложка, если она легче 1 МБ; обычно тяжелее и отсекается,
+ *                         поэтому в датасете первое сообщение без картинок у 696 записей из 698
+ *   остальные сообщения   каждый h2 открывает новое сообщение ("## ..."), h3 остаётся внутри ("### ...");
+ *                         картинка после текста открывает новое сообщение, поэтому images
+ *                         всегда стоят перед content, а картинка перед h2 даёт сообщение без текста
+ *   section.era-sources   отдельное сообщение "## Источники и время данных" со списком ссылок
+ *   images[]              raw base64 без data:-префикса, до 1 МБ каждая
+ *   publishedAt           полночь даты обзора в UTC+3
+ *
  * Разметка (проверена на «Обзор рынка криптовалют 02.10.2026»):
  *   article
  *     header.article-head      p.era-badges (рубрика + dd.mm.yyyy), h1
- *     p.article-cover > img    обложка
+ *     p.article-cover > img    обложка                  -> images[] при размере до 1 МБ
  *     div.article-body         содержимое по порядку:
  *        p.era-preview         скрытый тизер            -> пропускается
  *        table                 таблица метрик           -> markdown-таблица
@@ -429,8 +445,6 @@ export const firstArticleUrl = (html: string, base: string): string => {
  *        section.era-sources   источники
  *     div.article-speech, details.disclaimer            -> пропускаются
  *
- * Разбиение на сообщения: каждый h2 начинает новое; картинка после текста тоже
- * начинает новое, поэтому картинки сообщения всегда стоят перед его текстом.
  * У анонима тело статьи пустое и скрыто (hidden), это признак пейволла.
  */
 export const parseArticle = async (html: string, options: ParseOptions): Promise<Article> => {
@@ -456,7 +470,8 @@ export const parseArticle = async (html: string, options: ParseOptions): Promise
 
     const d = newDraft();
 
-    // шапка: заголовок, дата, обложка
+    // шапка: заголовок, обложка, мета-строки. Обложка проходит общий порог размера:
+    // фото тяжелее 1 МБ отсекается, лёгкая остаётся картинкой первого сообщения
     addHeading(d, `# ${squash(article.find("header.article-head h1, h1").first().text())}`, true);
     const cover = article.find(".article-cover img").first();
     const coverSrc = cover.length ? imgSrc(cover) : undefined;
