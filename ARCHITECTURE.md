@@ -42,3 +42,11 @@
   - [5. Разбор разметки](docs/BROWSER.md#5-разбор-разметки)
   - [6. Ошибки](docs/BROWSER.md#6-ошибки)
   - [7. Ограничения](docs/BROWSER.md#7-ограничения)
+
+- [docs/DUMP.md](docs/DUMP.md) — результаты прогона в `content/<месяц>/dump`: отчёты о сделках, лог агентов, кэш ответов и свечей, как их читать.
+  - [1. Структура](docs/DUMP.md#1-структура)
+  - [2. Отчёты: report/](docs/DUMP.md#2-отчёты-report)
+  - [3. Лог: log/log.jsonl](docs/DUMP.md#3-лог-loglogjsonl)
+  - [4. Ответы агентов: data/measure/](docs/DUMP.md#4-ответы-агентов-datameasure)
+  - [5. Свечи: data/candle/](docs/DUMP.md#5-свечи-datacandle)
+  - [6. Как читать результат](docs/DUMP.md#6-как-читать-результат)
