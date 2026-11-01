@@ -61,23 +61,10 @@ const Agent1Format = defineFormat({
 const Agent2Format = defineFormat({
   type: "object",
   additionalProperties: false,
-  required: ["criteria", "action", "description", "reasoning"],
+  required: ["id", "position", "description", "reasoning"],
   properties: {
-    criteria: {
-      type: "array",
-      items: {
-        type: "object",
-        additionalProperties: false,
-        required: ["id", "met", "level_tests", "evidence"],
-        properties: {
-          id: { type: "string" },
-          met: { type: "boolean" },
-          level_tests: { type: ["integer", "null"], description: "Сколько раз цена тестировала уровень" },
-          evidence: { type: "string", minLength: 1, description: "Обоснование по данным" },
-        },
-      },
-    },
-    action: { enum: ["long", "short", "wait"] },
+    id: { type: ["string", "null"], description: "id условия, которое видно на свечах. Если такого нет, null" },
+    position: { enum: ["long", "short", "wait"] },
     description: {
       type: "string",
       minLength: 1,
@@ -94,21 +81,8 @@ const Agent2Format = defineFormat({
 const Agent3Format = defineFormat({
   type: "object",
   additionalProperties: false,
-  required: ["criteria", "action", "description", "reasoning"],
+  required: ["action", "description", "reasoning"],
   properties: {
-    criteria: {
-      type: "array",
-      items: {
-        type: "object",
-        additionalProperties: false,
-        required: ["id", "relevant", "evidence"],
-        properties: {
-          id: { type: "string" },
-          relevant: { type: "boolean" },
-          evidence: { type: "string", minLength: 1, description: "Обоснование по данным" },
-        },
-      },
-    },
     action: { enum: ["hold", "close"] },
     description: {
       type: "string",
@@ -126,16 +100,8 @@ const Agent3Format = defineFormat({
 const Agent4Format = defineFormat({
   type: "object",
   additionalProperties: false,
-  required: ["forecast", "evidence_quote", "action", "description", "reasoning"],
+  required: ["action", "description", "reasoning"],
   properties: {
-    forecast: {
-      enum: ["supports", "contradicts", "neutral"],
-      description: "Как вывод обзора соотносится с направлением позиции",
-    },
-    evidence_quote: {
-      type: ["string", "null"],
-      description: "Дословная подстрока статьи с выводом автора. null только при neutral",
-    },
     action: { enum: ["hold", "close"] },
     description: {
       type: "string",
@@ -175,7 +141,7 @@ interface PositionState {
   criteria: Criterion[];
   /** Ответы агента 3 по каждой проверке */
   history: { when: string; answer: ExitAnswer }[];
-  /** Статьи, сверенные с позицией. Статья открытия сверена агентом 2 */
+  /** Статьи, сверенные с позицией. По статье открытия вход уже сделал агент 2 */
   reviewedArticleIds: string[];
   /** Ответы агента 4 по каждой новой статье */
   reviews: { when: string; articleId: string; answer: ReviewAnswer }[];
@@ -191,21 +157,10 @@ const getPromptPath = (name: string) => {
 
 const squash = (text: string) => text.replace(/\s+/g, " ").trim();
 
-const getArticleText = (article: Article) =>
-  squash(article.messages.map(({ content }) => content).join("\n"));
-
 const toCriteriaMessage = (criteria: Criterion[]) => ({
   role: "user" as const,
   content: `Критерии:\n${JSON.stringify(criteria, null, 2)}`,
 });
-
-const assertSameIds = (criteria: Criterion[], answer: { criteria: { id: string }[] }) => {
-  const expected = criteria.map(({ id }) => id).sort().join();
-  const actual = answer.criteria.map(({ id }) => id).sort().join();
-  if (expected !== actual) {
-    throw new Error(`Agent: answer ids [${actual}] do not match criteria [${expected}]`);
-  }
-};
 
 /** Закрытые свечи на момент проверки: время берётся из контекста backtest-kit */
 const getCandleFiles = (symbol: string) =>
@@ -248,7 +203,7 @@ export class AgentUtils {
       },
       { dispatcher: this._dispatcher },
     );
-    const text = getArticleText(article);
+    const text = squash(article.messages.map(({ content }) => content).join("\n"));
     return {
       ...answer,
       criteria: answer.criteria
@@ -257,16 +212,15 @@ export class AgentUtils {
     };
   };
 
-  /** Агент 2 */
+  /** Агент 2. Смотрит свечи и достаёт из условий агента 1 то, которое на них видно */
   public getEntry = async (
     symbol: string,
-    article: Article,
     criteria: Criterion[],
     when: Date,
   ): Promise<EntryAnswer> => {
     const answer = await generateObject(
       {
-        messages: [...article.messages, toCriteriaMessage(criteria)],
+        messages: [toCriteriaMessage(criteria)],
         files: await getCandleFiles(symbol),
         instructions: await renderMustache(getPromptPath("agent2"), {
           symbol,
@@ -276,7 +230,15 @@ export class AgentUtils {
       },
       { dispatcher: this._dispatcher },
     );
-    assertSameIds(criteria, answer);
+    if (answer.position !== "wait") {
+      const criterion = criteria.find(({ id }) => id === answer.id);
+      if (!criterion) {
+        throw new Error(`Agent: position ${answer.position} has unknown id ${answer.id}`);
+      }
+      if (criterion.direction !== (answer.position === "long" ? "up" : "down")) {
+        throw new Error(`Agent: position ${answer.position} does not match ${criterion.direction} condition ${criterion.id}`);
+      }
+    }
     return answer;
   };
 
@@ -284,7 +246,6 @@ export class AgentUtils {
   public getExit = async (
     symbol: string,
     signal: IPublicSignalRow,
-    article: Article | null,
     criteria: Criterion[],
     when: Date,
   ): Promise<ExitAnswer> => {
@@ -297,9 +258,9 @@ export class AgentUtils {
         pendingAt: new Date(signal.pendingAt).toISOString(),
       }, null, 2)}`,
     };
-    const answer = await generateObject(
+    return await generateObject(
       {
-        messages: [...(article?.messages ?? []), toCriteriaMessage(criteria), position],
+        messages: [toCriteriaMessage(criteria), position],
         files: await getCandleFiles(symbol),
         instructions: await renderMustache(getPromptPath("agent3"), {
           symbol,
@@ -309,16 +270,14 @@ export class AgentUtils {
       },
       { dispatcher: this._dispatcher },
     );
-    assertSameIds(criteria, answer);
-    return answer;
   };
 
-  /** Агент 4. Сверяет вывод новой статьи с открытой позицией */
+  /** Агент 4. Сверяет условие новой статьи, видное на свечах, с открытой позицией */
   public getReview = async (
     symbol: string,
     signal: IPublicSignalRow,
-    article: Article,
-    criteria: Criterion[],
+    criterion: Criterion,
+    description: string,
     when: Date,
   ): Promise<ReviewAnswer> => {
     const position = {
@@ -332,9 +291,13 @@ export class AgentUtils {
         openingCriteria: signal.payload?.criteria ?? [],
       }, null, 2)}`,
     };
-    const answer = await generateObject(
+    return await generateObject(
       {
-        messages: [...article.messages, toCriteriaMessage(criteria), position],
+        messages: [
+          { role: "user" as const, content: `Что видно на свечах:\n${description}` },
+          toCriteriaMessage([criterion]),
+          position,
+        ],
         files: await getCandleFiles(symbol),
         instructions: await renderMustache(getPromptPath("agent4"), {
           symbol,
@@ -344,12 +307,6 @@ export class AgentUtils {
       },
       { dispatcher: this._dispatcher },
     );
-    if (answer.forecast !== "neutral") {
-      if (!answer.evidence_quote || !getArticleText(article).includes(squash(answer.evidence_quote))) {
-        throw new Error(`Agent: forecast ${answer.forecast} has no verbatim quote`);
-      }
-    }
-    return answer;
   };
 
   /** Состояние открытой позиции */

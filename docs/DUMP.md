@@ -87,9 +87,9 @@ dump/
 | Папка | Имя файла | `data` |
 |---|---|---|
 | `agent1_v1_1d_0` | `BTCUSDT_<id статьи>.json` | `criteria`, `description`, `reasoning` |
-| `agent2_v1_4h_1` | `BTCUSDT_<время в мс>.json` | `criteria`, `action`, `description`, `reasoning` |
-| `agent3_v1_4h_2` | `BTCUSDT_<время в мс>_<id сигнала>.json` | `criteria`, `action`, `description`, `reasoning` |
-| `agent4_v1_1d_3` | `BTCUSDT_<id статьи>_<id сигнала>.json` | `forecast`, `evidence_quote`, `action`, `description`, `reasoning` |
+| `agent2_v1_4h_1` | `BTCUSDT_<время в мс>.json` | `id`, `position`, `description`, `reasoning` |
+| `agent3_v1_4h_2` | `BTCUSDT_<время в мс>_<id сигнала>.json` | `action`, `description`, `reasoning` |
+| `agent4_v1_1d_3` | `BTCUSDT_<id статьи>_<id сигнала>.json` | `action`, `description`, `reasoning` |
 
 При повторном прогоне ответы берутся отсюда, запросов к модели нет. Чтобы получить новые ответы, удалите нужную папку. Чтобы сохранить старые, скопируйте её в `./tmp` проекта.
 
@@ -115,7 +115,7 @@ jq -c 'select(.data.action == "closed") | .data | {position, closeReason, pnl, o
 Сверки новых статей с позицией:
 
 ```bash
-jq -c '.data | {forecast, action, evidence_quote, description}' data/measure/agent4_v1_1d_3/*.json
+jq -c '.data | {action, description}' data/measure/agent4_v1_1d_3/*.json
 ```
 
 Что не хватало агентам:

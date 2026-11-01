@@ -6,6 +6,9 @@ import { join } from "path";
 
 const DATASET_ASSETS_PATH = "./assets/wwwroot.jsonl";
 const ROOT_PATH_SYMBOL = Symbol.for("root_path");
+const DAY_MS = 24 * 60 * 60 * 1000;
+/** Обзор действует 7 дней, новый обзор заменяет его и сбрасывает отсчёт */
+const ARTICLE_TTL_DAYS = 7;
 
 interface Article {
   id: string;
@@ -71,7 +74,7 @@ export class DatasetUtils {
   /** Индекс строк: день публикации -> где лежат строки. Сами строки в памяти не держим */
   private _indexMap = new Map<DateKey, LineRef[]>();
 
-  /** Прочитанные дни: только текущий и предыдущий, см. getArticle */
+  /** Прочитанные дни: только просмотренные последним запросом, см. getArticle */
   private _cacheMap = new Map<DateKey, Article[]>();
 
   private waitForInit = singleshot(async () => {
@@ -134,28 +137,24 @@ export class DatasetUtils {
 
   public getArticle = async (when: Date): Promise<Article | null> => {
     await this.waitForInit();
-    // Корзины текущего и предыдущего дня: окно свежести переживает полночь,
-    // предыдущий день целиком в прошлом - look ahead не появляется
-    const dayBefore = new Date(when.getTime() - 24 * 60 * 60 * 1000);
-    const keys = [toDateKey(dayBefore), toDateKey(when)];
-    const articles = [
-      ...(await this.readDay(keys[0])),
-      ...(await this.readDay(keys[1])),
-    ];
-    // В памяти остаются только эти два дня: при переходе через полночь
-    // вчерашний уже прочитан, позавчерашний выгружается
+    const keys: DateKey[] = [];
+    let published: Article[] = [];
+    // Идём от текущего дня назад: первый день с подходящей записью содержит последний обзор
+    for (let days = 0; days <= ARTICLE_TTL_DAYS && !published.length; days++) {
+      const key = toDateKey(new Date(when.getTime() - days * DAY_MS));
+      keys.push(key);
+      // Без look ahead bias: берем только обзоры, опубликованные не позже when
+      published = (await this.readDay(key)).filter((article) => {
+        const age = when.getTime() - new Date(article.publishedAt).getTime();
+        return age >= 0 && age <= ARTICLE_TTL_DAYS * DAY_MS;
+      });
+    }
+    // В памяти остаются только дни, просмотренные этим запросом
     for (const key of this._cacheMap.keys()) {
       if (!keys.includes(key)) {
         this._cacheMap.delete(key);
       }
     }
-    if (!articles.length) {
-      return null;
-    }
-    // Без look ahead bias: берем только обзоры, опубликованные не позже when
-    const published = articles.filter(
-      (article) => new Date(article.publishedAt).getTime() <= when.getTime(),
-    );
     if (!published.length) {
       return null;
     }

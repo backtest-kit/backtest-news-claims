@@ -38,9 +38,10 @@ const getCriteria = Cache.file(
   },
 );
 
+// На 4 часа, а не на сутки: вход после закрытия позиции не должен получить старый ответ
 const getEntry = Cache.file(
-  async (symbol: string, article: Article, criteria: Criterion[], when: Date) =>
-    Agent.getEntry(symbol, article, criteria, when),
+  async (symbol: string, criteria: Criterion[], when: Date) =>
+    Agent.getEntry(symbol, criteria, when),
   {
     interval: "4h",
     name: "agent2_v1",
@@ -51,10 +52,9 @@ const getExit = Cache.file(
   async (
     symbol: string,
     signal: IPublicSignalRow,
-    article: Article | null,
     criteria: Criterion[],
     when: Date,
-  ) => Agent.getExit(symbol, signal, article, criteria, when),
+  ) => Agent.getExit(symbol, signal, criteria, when),
   {
     interval: "4h",
     name: "agent3_v1",
@@ -67,16 +67,33 @@ const getReview = Cache.file(
   async (
     symbol: string,
     signal: IPublicSignalRow,
-    article: Article,
-    criteria: Criterion[],
+    articleId: string,
+    criterion: Criterion,
+    description: string,
     when: Date,
-  ) => Agent.getReview(symbol, signal, article, criteria, when),
+  ) => Agent.getReview(symbol, signal, criterion, description, when),
   {
     interval: "1d",
     name: "agent4_v1",
-    key: ([symbol, , signal, article]) => `${symbol}_${article.id}_${signal.id}`,
+    key: ([symbol, , signal, articleId]) => `${symbol}_${articleId}_${signal.id}`,
   },
 );
+
+/** Условие статьи, которое агент 2 увидел на свечах */
+const getArgument = async (symbol: string, article: Article, when: Date) => {
+  const review = await getCriteria(symbol, article);
+  Log.info("agent1", `${article.when}: ${review.criteria.length} условий, не хватило: ${review.reasoning}`);
+  if (!review.criteria.length) {
+    return null;
+  }
+  const answer = await getEntry(symbol, review.criteria, when);
+  Log.info("agent2", `${when.toISOString()}: ${answer.position} ${answer.id}, не хватило: ${answer.reasoning}`);
+  const criterion = review.criteria.find(({ id }) => id === answer.id);
+  if (answer.position === "wait" || !criterion) {
+    return null;
+  }
+  return { answer, criterion, position: answer.position };
+};
 
 addStrategySchema({
   strategyName: "main_strategy",
@@ -87,30 +104,25 @@ listenIdlePing(async ({ symbol, when, currentPrice }) => {
   if (!article) {
     return;
   }
-  const { criteria, reasoning } = await getCriteria(symbol, article);
-  Log.info("agent1", `${article.when}: ${criteria.length} критериев, не хватило: ${reasoning}`);
-  if (!criteria.length) {
+  const argument = await getArgument(symbol, article, when);
+  if (!argument) {
     return;
   }
-  const answer = await getEntry(symbol, article, criteria, when);
-  Log.info("agent2", `${when.toISOString()}: ${answer.action}, не хватило: ${answer.reasoning}`);
-  if (answer.action === "wait") {
-    return;
-  }
+  const { answer, criterion, position } = argument;
   await commitCreateSignal(symbol, {
     ...Position.moonbag({
-      position: answer.action,
+      position,
       currentPrice,
       percentStopLoss: HARD_STOP_PERCENT,
     }),
-    payload: { articleId: article.id, criteria, answer },
+    payload: { articleId: article.id, criteria: [criterion], answer },
     note: answer.description,
   });
 });
 
 // Подписчики вызываются в порядке подписки, сбой одного не останавливает следующих
 
-// Критерии новой статьи: нужны агенту 3
+// Условие новой статьи: нужно агенту 3
 listenActivePingFilter(
   async ({ when }) => {
     const article = await Dataset.getArticle(when);
@@ -118,9 +130,11 @@ listenActivePingFilter(
   },
   async ({ symbol, when }) => {
     const article = await Dataset.getArticle(when);
-    const answer = await getCriteria(symbol, article!);
-    Log.info("agent1", `${article!.when}: ${answer.criteria.length} критериев, не хватило: ${answer.reasoning}`);
-    await Agent.addCriteria(article!.id, answer.criteria);
+    const argument = await getArgument(symbol, article!, when);
+    // Условие ещё не видно на свечах: проверка повторится на следующем пинге
+    if (argument) {
+      await Agent.addCriteria(article!.id, [argument.criterion]);
+    }
   },
 );
 
@@ -132,9 +146,13 @@ listenActivePingFilter(
   },
   async ({ symbol, when, data }) => {
     const article = await Dataset.getArticle(when);
-    const { criteria } = await getCriteria(symbol, article!);
-    const answer = await getReview(symbol, data, article!, criteria, when);
-    Log.info("agent4", `${article!.when}: ${answer.forecast}, ${answer.action}, не хватило: ${answer.reasoning}`);
+    const argument = await getArgument(symbol, article!, when);
+    // Сверять нечего: условие статьи ещё не видно на свечах
+    if (!argument) {
+      return;
+    }
+    const answer = await getReview(symbol, data, article!.id, argument.criterion, argument.answer.description, when);
+    Log.info("agent4", `${article!.when}: ${answer.action}, не хватило: ${answer.reasoning}`);
     await Agent.addReview(article!.id, answer, when);
     if (answer.action === "close") {
       await commitClosePending(symbol, {
@@ -149,8 +167,7 @@ listenActivePingFilter(
   async ({ symbol }) => !!(await getPendingSignal(symbol)),
   async ({ symbol, when, data }) => {
     const { criteria } = await Agent.getPosition();
-    const article = await Dataset.getArticle(when);
-    const answer = await getExit(symbol, data, article, criteria, when);
+    const answer = await getExit(symbol, data, criteria, when);
     Log.info("agent3", `${when.toISOString()}: ${answer.action}, не хватило: ${answer.reasoning}`);
     await Agent.addAnswer(answer, when);
     if (answer.action === "close") {
