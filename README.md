@@ -19,9 +19,6 @@ Market commentary is full of statements like "if BTC closes above $78,250, the p
 - **The agent decides, the code executes.** Entry and exit are agent decisions. Code feeds data without look-ahead, executes answers and validates every response.
 - **Every run replays from cache.** Model answers are stored per month, so a finished run can be repeated without new requests.
 
-📚 **[Architecture](ARCHITECTURE.md)** | 🤖 **[Agents](docs/AGENT.md)** | 🗂️ **[Dataset](docs/DATASET.md)** | ⚙️ **[Runtime](docs/RUNTIME.md)** | 📦 **[Run output](docs/DUMP.md)**
-
-
 ## 🚀 Quick Start
 
 **1. Start the agent runtime.** Put your Ollama key in `.env`:
