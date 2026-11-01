@@ -1,4 +1,4 @@
-import { Browser } from "../classes/Browser.ts";
+import { Browser } from "../../classes/Browser.ts";
 import { writeFile, mkdir } from "fs/promises";
 
 async function createFolder(path: string) {
