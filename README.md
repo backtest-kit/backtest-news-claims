@@ -2,7 +2,7 @@
 
 # 🧿 backtest-news-claims
 
-> A self-enforcing runtime for a trading agent, built on [backtest-kit](https://github.com/tripolskypetr/backtest-kit): LLM agents read market articles, extract the author's price claims, check those claims against closed candles and decide on trades themselves. The runtime only feeds them data without look-ahead, executes their answers, holds the exchange stop and validates every response. The benchmark is simply holding BTC.
+> A self-enforcing runtime for a trading agent, built on [backtest-kit](https://github.com/tripolskypetr/backtest-kit): LLM agents read market articles, extract the author's price claims, check those claims against closed candles and decide on trades themselves. The runtime only feeds them data without look-ahead, executes their answers and validates every response. The benchmark is simply holding BTC.
 
 ![screenshot](https://raw.githubusercontent.com/tripolskypetr/backtest-kit/HEAD/assets/screenshots/screenshot16.png)
 
@@ -16,7 +16,7 @@ Market commentary is full of statements like "if BTC closes above $78,250, the p
 - **Claims, not sentiment.** An agent extracts only statements where the author ties a named price to the next move, each with a verbatim quote. News, moods and forecasts without a price are dropped.
 - **Candles, not indicators.** Agents look at what price actually did at the author's level, in closed candle files. Nothing is confirmed by a moving average or RSI.
 - **No look-ahead by design.** Agents work with what the runtime gives them: the article published by that moment, and CSV files of candles already closed by then, read through `bash`.
-- **The agent decides, the code executes.** Entry and exit are agent decisions. Code feeds data without look-ahead, executes answers, holds the exchange stop and validates every response.
+- **The agent decides, the code executes.** Entry and exit are agent decisions. Code feeds data without look-ahead, executes answers and validates every response.
 - **Every run replays from cache.** Model answers are stored per month, so a finished run can be repeated without new requests.
 
 Multi-month backtests are the next step, and results will be published here once they are complete. A result counts only when it beats holding BTC after costs.
@@ -78,7 +78,7 @@ An article stays valid for 7 days. A new BTC article replaces it and resets the 
 
 Every answer also carries `description`, shown in the backtest-kit UI, and `reasoning`, which says what data the agent lacked. Read `reasoning` before changing a prompt.
 
-Code stays out of trading decisions. It feeds data, executes answers and sets a 7.5% exchange stop. It also checks each answer against its schema, drops any claim whose price is missing from a verbatim quote, and caches answers.
+Code stays out of trading decisions. It feeds data and executes answers. It also checks each answer against its schema, drops any claim whose price is missing from a verbatim quote, and caches answers.
 
 
 ## 🗂️ Data
@@ -96,7 +96,7 @@ Candles come from Binance spot through `ccxt`. Authors sometimes name CME future
 |---|---|
 | **Subject** | Author price claims from market articles, checked against closed BTCUSDT candles |
 | **Model** | `deepseek-v4.1-flash` via [agent-runtime](https://github.com/tripolskypetr/agent-runtime) on Ollama |
-| **Execution** | Agent-driven entry and exit, 7.5% exchange stop, no position time limit |
+| **Execution** | Agent-driven entry and exit |
 | **Benchmark** | Holding BTC over the same period, after costs |
 | **Status** | Months from January 2025 to October 2026 are set up; multi-month backtests are the next step |
 | **Playbook** | [CLAUDE.md](CLAUDE.md): project rules, including no fitting to one month and no invented indicators |
