@@ -4,7 +4,8 @@ import {
   Cache,
   commitClosePending,
   commitCreateSignal,
-  listenActivePing,
+  getPendingSignal,
+  listenActivePingFilter,
   listenIdlePing,
   Log,
   Position,
@@ -32,7 +33,7 @@ const getCriteria = Cache.file(
   async (_symbol: string, article: Article) => Agent.getCriteria(article),
   {
     interval: "1d",
-    name: "agent1_v1",
+    name: "agent1_v2",
     key: ([symbol, , article]) => `${symbol}_${article.id}`,
   },
 );
@@ -42,7 +43,7 @@ const getEntry = Cache.file(
     Agent.getEntry(symbol, article, criteria, when),
   {
     interval: "4h",
-    name: "agent2_v1",
+    name: "agent2_v2",
   },
 );
 
@@ -56,8 +57,24 @@ const getExit = Cache.file(
   ) => Agent.getExit(symbol, signal, article, criteria, when),
   {
     interval: "4h",
-    name: "agent3_v1",
+    name: "agent3_v2",
     key: ([symbol, alignMs, signal]) => `${symbol}_${alignMs}_${signal.id}`,
+  },
+);
+
+// Кэш по статье и сигналу: одна сверка статьи с позицией
+const getReview = Cache.file(
+  async (
+    symbol: string,
+    signal: IPublicSignalRow,
+    article: Article,
+    criteria: Criterion[],
+    when: Date,
+  ) => Agent.getReview(symbol, signal, article, criteria, when),
+  {
+    interval: "1d",
+    name: "agent4_v1",
+    key: ([symbol, , signal, article]) => `${symbol}_${article.id}_${signal.id}`,
   },
 );
 
@@ -91,23 +108,58 @@ listenIdlePing(async ({ symbol, when, currentPrice }) => {
   });
 });
 
-listenActivePing(async ({ symbol, when, data }) => {
-  const article = await Dataset.getArticle(when);
-  if (article && !(await Agent.getPosition()).articleIds.includes(article.id)) {
-    const answer = await getCriteria(symbol, article);
-    Log.info("agent1", `${article.when}: ${answer.criteria.length} критериев, не хватило: ${answer.reasoning}`);
-    await Agent.addCriteria(article.id, answer.criteria);
-  }
-  const { criteria } = await Agent.getPosition();
-  const answer = await getExit(symbol, data, article, criteria, when);
-  Log.info("agent3", `${when.toISOString()}: ${answer.action}, не хватило: ${answer.reasoning}`);
-  await Agent.addAnswer(answer, when);
-  if (answer.action === "close") {
-    await commitClosePending(symbol, {
-      note: answer.description,
-    });
-  }
-});
+// Подписчики вызываются в порядке подписки, сбой одного не останавливает следующих
+
+// Критерии новой статьи: нужны агенту 3
+listenActivePingFilter(
+  async ({ when }) => {
+    const article = await Dataset.getArticle(when);
+    return !!article && !(await Agent.getPosition()).articleIds.includes(article.id);
+  },
+  async ({ symbol, when }) => {
+    const article = await Dataset.getArticle(when);
+    const answer = await getCriteria(symbol, article!);
+    Log.info("agent1", `${article!.when}: ${answer.criteria.length} критериев, не хватило: ${answer.reasoning}`);
+    await Agent.addCriteria(article!.id, answer.criteria);
+  },
+);
+
+// Агент 4: сверка новой статьи с позицией
+listenActivePingFilter(
+  async ({ when }) => {
+    const article = await Dataset.getArticle(when);
+    return !!article && !(await Agent.getPosition()).reviewedArticleIds.includes(article.id);
+  },
+  async ({ symbol, when, data }) => {
+    const article = await Dataset.getArticle(when);
+    const { criteria } = await getCriteria(symbol, article!);
+    const answer = await getReview(symbol, data, article!, criteria, when);
+    Log.info("agent4", `${article!.when}: ${answer.forecast}, ${answer.action}, не хватило: ${answer.reasoning}`);
+    await Agent.addReview(article!.id, answer, when);
+    if (answer.action === "close") {
+      await commitClosePending(symbol, {
+        note: answer.description,
+      });
+    }
+  },
+);
+
+// Агент 3: плановая проверка. Если агент 4 закрыл позицию на этом пинге, сигнала уже нет
+listenActivePingFilter(
+  async ({ symbol }) => !!(await getPendingSignal(symbol)),
+  async ({ symbol, when, data }) => {
+    const { criteria } = await Agent.getPosition();
+    const article = await Dataset.getArticle(when);
+    const answer = await getExit(symbol, data, article, criteria, when);
+    Log.info("agent3", `${when.toISOString()}: ${answer.action}, не хватило: ${answer.reasoning}`);
+    await Agent.addAnswer(answer, when);
+    if (answer.action === "close") {
+      await commitClosePending(symbol, {
+        note: answer.description,
+      });
+    }
+  },
+);
 
 addLauncherSchema({
   launcherName: "main_launcher",

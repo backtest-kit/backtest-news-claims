@@ -17,9 +17,10 @@ dump/
 │   └── log.jsonl           ответы агентов из Log.info
 └── data/
     ├── measure/            кэш ответов агентов
-    │   ├── agent1_v1_1d_0/
-    │   ├── agent2_v1_4h_1/
-    │   └── agent3_v1_4h_2/
+    │   ├── agent1_v2_1d_0/
+    │   ├── agent2_v2_4h_1/
+    │   ├── agent3_v2_4h_2/
+    │   └── agent4_v1_1d_3/
     ├── candle/ccxt-exchange/BTCUSDT/  кэш свечей
     │   ├── 1d/
     │   ├── 1h/
@@ -50,7 +51,7 @@ dump/
 | `closeReason` | только `closed`: `time_expired`, `take_profit`, `stop_loss`, `liquidation` или `closed` |
 | `closeTime`, `duration` | только `closed`: время закрытия и длительность в минутах |
 
-`closeReason: "closed"` означает закрытие через `commitClosePending`, то есть решением агента 3.
+`closeReason: "closed"` означает закрытие через `commitClosePending`, то есть решением агента 3 или 4. `closeReason: "time_expired"` означает, что позиция дожила до конца frame и backtest-kit закрыл её принудительно: это не решение агента.
 
 ### Остальные отчёты
 
@@ -68,7 +69,7 @@ dump/
 
 | Поле | Значение |
 |---|---|
-| `topic` | `agent1`, `agent2` или `agent3` |
+| `topic` | `agent1`, `agent2`, `agent3` или `agent4` |
 | `args[0]` | решение агента и его `reasoning` |
 | `createdAt` | время бэктеста, а не реальное время записи |
 | `methodContext`, `executionContext` | стратегия, frame, символ, момент |
@@ -85,9 +86,10 @@ dump/
 
 | Папка | Имя файла | `data` |
 |---|---|---|
-| `agent1_v1_1d_0` | `BTCUSDT_<id статьи>.json` | `criteria`, `description`, `reasoning` |
-| `agent2_v1_4h_1` | `BTCUSDT_<время в мс>.json` | `criteria`, `action`, `description`, `reasoning` |
-| `agent3_v1_4h_2` | `BTCUSDT_<время в мс>_<id сигнала>.json` | `criteria`, `action`, `description`, `reasoning` |
+| `agent1_v2_1d_0` | `BTCUSDT_<id статьи>.json` | `criteria`, `description`, `reasoning` |
+| `agent2_v2_4h_1` | `BTCUSDT_<время в мс>.json` | `criteria`, `action`, `description`, `reasoning` |
+| `agent3_v2_4h_2` | `BTCUSDT_<время в мс>_<id сигнала>.json` | `criteria`, `action`, `description`, `reasoning` |
+| `agent4_v1_1d_3` | `BTCUSDT_<id статьи>_<id сигнала>.json` | `forecast`, `evidence_quote`, `action`, `description`, `reasoning` |
 
 При повторном прогоне ответы берутся отсюда, запросов к модели нет. Чтобы получить новые ответы, удалите нужную папку или смените `name` в `Cache.file`.
 
@@ -110,6 +112,12 @@ cd content/sep_2026/dump
 jq -c 'select(.data.action == "closed") | .data | {position, closeReason, pnl, openTime, closeTime}' report/backtest.jsonl
 ```
 
+Сверки новых статей с позицией:
+
+```bash
+jq -c '.data | {forecast, action, evidence_quote, description}' data/measure/agent4_v1_1d_3/*.json
+```
+
 Что не хватало агентам:
 
 ```bash
@@ -119,5 +127,5 @@ jq -r '[.createdAt, .topic, .args[0]] | @tsv' log/log.jsonl
 Найденные критерии:
 
 ```bash
-jq -c '.data.criteria[]' data/measure/agent1_v1_1d_0/*.json
+jq -c '.data.criteria[]' data/measure/agent1_v2_1d_0/*.json
 ```

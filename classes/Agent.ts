@@ -123,6 +123,33 @@ const Agent3Format = defineFormat({
   },
 });
 
+const Agent4Format = defineFormat({
+  type: "object",
+  additionalProperties: false,
+  required: ["forecast", "evidence_quote", "action", "description", "reasoning"],
+  properties: {
+    forecast: {
+      enum: ["supports", "contradicts", "neutral"],
+      description: "Как вывод обзора соотносится с направлением позиции",
+    },
+    evidence_quote: {
+      type: ["string", "null"],
+      description: "Дословная подстрока статьи с выводом автора. null только при neutral",
+    },
+    action: { enum: ["hold", "close"] },
+    description: {
+      type: "string",
+      minLength: 1,
+      description: "Понятное описание решения для человека, показывается в интерфейсе",
+    },
+    reasoning: {
+      type: "string",
+      minLength: 1,
+      description: "Каких данных не хватило для ответа. Если хватило всех, так и напиши",
+    },
+  },
+});
+
 interface Article {
   id: string;
   when: string;
@@ -139,6 +166,7 @@ export type CriteriaAnswer = InferFormat<typeof Agent1Format>;
 export type Criterion = CriteriaAnswer["criteria"][number];
 export type EntryAnswer = InferFormat<typeof Agent2Format>;
 export type ExitAnswer = InferFormat<typeof Agent3Format>;
+export type ReviewAnswer = InferFormat<typeof Agent4Format>;
 
 interface PositionState {
   /** Статьи, чьи критерии уже учтены */
@@ -147,6 +175,10 @@ interface PositionState {
   criteria: Criterion[];
   /** Ответы агента 3 по каждой проверке */
   history: { when: string; answer: ExitAnswer }[];
+  /** Статьи, сверенные с позицией. Статья открытия сверена агентом 2 */
+  reviewedArticleIds: string[];
+  /** Ответы агента 4 по каждой новой статье */
+  reviews: { when: string; articleId: string; answer: ReviewAnswer }[];
 }
 
 const getPromptPath = (name: string) => {
@@ -158,6 +190,9 @@ const getPromptPath = (name: string) => {
 };
 
 const squash = (text: string) => text.replace(/\s+/g, " ").trim();
+
+const getArticleText = (article: Article) =>
+  squash(article.messages.map(({ content }) => content).join("\n"));
 
 const toCriteriaMessage = (criteria: Criterion[]) => ({
   role: "user" as const,
@@ -198,6 +233,8 @@ export class AgentUtils {
       articleIds: [signal.payload?.articleId],
       criteria: signal.payload?.criteria ?? [],
       history: [],
+      reviewedArticleIds: [signal.payload?.articleId],
+      reviews: [],
     }),
   });
 
@@ -211,7 +248,7 @@ export class AgentUtils {
       },
       { dispatcher: this._dispatcher },
     );
-    const text = squash(article.messages.map(({ content }) => content).join("\n"));
+    const text = getArticleText(article);
     return {
       ...answer,
       criteria: answer.criteria
@@ -286,6 +323,45 @@ export class AgentUtils {
     return answer;
   };
 
+  /** Агент 4. Сверяет вывод новой статьи с открытой позицией */
+  public getReview = async (
+    symbol: string,
+    signal: IPublicSignalRow,
+    article: Article,
+    criteria: Criterion[],
+    when: Date,
+  ): Promise<ReviewAnswer> => {
+    const position = {
+      role: "user" as const,
+      content: `Позиция:\n${JSON.stringify({
+        position: signal.position,
+        priceOpen: signal.priceOpen,
+        priceStopLoss: signal.priceStopLoss,
+        pendingAt: new Date(signal.pendingAt).toISOString(),
+        openingReason: signal.note,
+        openingCriteria: signal.payload?.criteria ?? [],
+      }, null, 2)}`,
+    };
+    const answer = await generateObject(
+      {
+        messages: [...article.messages, toCriteriaMessage(criteria), position],
+        files: await getCandleFiles(symbol),
+        instructions: await renderMustache(getPromptPath("agent4"), {
+          symbol,
+          when: when.toISOString(),
+        }),
+        format: Agent4Format,
+      },
+      { dispatcher: this._dispatcher },
+    );
+    if (answer.forecast !== "neutral") {
+      if (!answer.evidence_quote || !getArticleText(article).includes(squash(answer.evidence_quote))) {
+        throw new Error(`Agent: forecast ${answer.forecast} has no verbatim quote`);
+      }
+    }
+    return answer;
+  };
+
   /** Состояние открытой позиции */
   public getPosition = () => this._positionState.getState();
 
@@ -302,6 +378,14 @@ export class AgentUtils {
     this._positionState.setState((state) => ({
       ...state,
       history: [...state.history, { when: when.toISOString(), answer }],
+    }));
+
+  /** Записывает ответ агента 4 в историю позиции */
+  public addReview = (articleId: string, answer: ReviewAnswer, when: Date) =>
+    this._positionState.setState((state) => ({
+      ...state,
+      reviewedArticleIds: [...state.reviewedArticleIds, articleId],
+      reviews: [...state.reviews, { when: when.toISOString(), articleId, answer }],
     }));
 }
 
