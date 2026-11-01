@@ -19,8 +19,6 @@ Market commentary is full of statements like "if BTC closes above $78,250, the p
 - **The agent decides, the code executes.** Entry and exit are agent decisions. Code feeds data without look-ahead, executes answers and validates every response.
 - **Every run replays from cache.** Model answers are stored per month, so a finished run can be repeated without new requests.
 
-Multi-month backtests are the next step, and results will be published here once they are complete. A result counts only when it beats holding BTC after costs.
-
 📚 **[Architecture](ARCHITECTURE.md)** | 🤖 **[Agents](docs/AGENT.md)** | 🗂️ **[Dataset](docs/DATASET.md)** | ⚙️ **[Runtime](docs/RUNTIME.md)** | 📦 **[Run output](docs/DUMP.md)**
 
 
@@ -98,5 +96,4 @@ Candles come from Binance spot through `ccxt`. Authors sometimes name CME future
 | **Model** | `deepseek-v4.1-flash` via [agent-runtime](https://github.com/tripolskypetr/agent-runtime) on Ollama |
 | **Execution** | Agent-driven entry and exit |
 | **Benchmark** | Holding BTC over the same period, after costs |
-| **Status** | Months from January 2025 to October 2026 are set up; multi-month backtests are the next step |
 | **Playbook** | [CLAUDE.md](CLAUDE.md): project rules, including no fitting to one month and no invented indicators |
