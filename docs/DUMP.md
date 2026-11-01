@@ -12,6 +12,7 @@ dump/
 │   ├── highest_profit.jsonl  новые максимумы прибыли
 │   ├── max_drawdown.jsonl  новые максимумы просадки
 │   ├── partial.jsonl       пройденные уровни прибыли и убытка
+│   ├── strategy.jsonl      команды стратегии, например закрытие позиции
 │   └── breakeven.jsonl     достижение безубытка
 ├── log/
 │   └── log.jsonl           ответы агентов из Log.info
@@ -62,6 +63,7 @@ dump/
 | `max_drawdown.jsonl` | позиция обновила максимум просадки |
 | `partial.jsonl` | цена прошла уровень прибыли или убытка, поля `action` и `level` |
 | `breakeven.jsonl` | цена дошла до безубытка |
+| `strategy.jsonl` | стратегия отправила команду, поле `action`, например `close-pending`, с текстом в `note` |
 
 ## 3. Лог: `log/log.jsonl`
 
@@ -124,7 +126,7 @@ jq -c '.data | {action, description}' data/measure/agent4_v1_1d_3/*.json
 jq -r '[.createdAt, .topic, .args[0]] | @tsv' log/log.jsonl
 ```
 
-Найденные критерии:
+Найденные условия:
 
 ```bash
 jq -c '.data.criteria[]' data/measure/agent1_v1_1d_0/*.json

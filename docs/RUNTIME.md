@@ -88,11 +88,7 @@ curl -s http://localhost:10050/api/v1/health | jq
 
 ## 4. Вызов из стратегии
 
-Клиент это пакет [agent-runtime-sdk](https://www.npmjs.com/package/agent-runtime-sdk). Встроенный `fetch` обрывает запрос без ответа через 300 секунд, поэтому `classes/Agent.ts` передаёт ему dispatcher из `undici` без таймаутов. `undici` сейчас приходит транзитивно и в `package.json` не указан:
-
-```bash
-npm i undici@7.29.1 --save-exact
-```
+Клиент это пакет [agent-runtime-sdk](https://www.npmjs.com/package/agent-runtime-sdk). Встроенный `fetch` обрывает запрос без ответа через 300 секунд, поэтому `classes/Agent.ts` передаёт ему dispatcher из `undici` без таймаутов.
 
 | Файл | Что в нём |
 |---|---|
@@ -106,7 +102,7 @@ npm i undici@7.29.1 --save-exact
 |---|---|
 | `instructions` | промпт агента из `prompt/*.mustache` |
 | `messages` | у агента 1 сообщения статьи с картинками, у остальных условия и данные позиции, все с ролью `user` |
-| `files` | `candles_1d.csv`, `candles_1h.csv`, `candles_1m.csv` |
+| `files` | у агентов 2, 3 и 4 `candles_1d.csv`, `candles_1h.csv`, `candles_1m.csv`, у агента 1 пусто |
 | `format` | схема ответа, литерал в `defineFormat` |
 
 Модель в запросе не указывается, её задаёт `.env`.
