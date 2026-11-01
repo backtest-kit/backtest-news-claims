@@ -38,8 +38,8 @@ const Agent1Format = defineFormat({
         properties: {
           id: { type: "string", pattern: "^c[0-9]{1,2}$" },
           direction: { enum: ["up", "down"] },
-          condition: { type: "string", minLength: 1, description: "Условие своими словами" },
-          level: { type: ["number", "null"], description: "Уровень цены из статьи" },
+          condition: { type: "string", minLength: 1, description: "Тейк своими словами" },
+          level: { type: "number", description: "Цена из тейка автора" },
           horizon: { type: ["string", "null"], description: "Срок из статьи" },
           evidence_quote: { type: "string", minLength: 1, description: "Дословная подстрока статьи" },
         },
@@ -157,6 +157,12 @@ const getPromptPath = (name: string) => {
 
 const squash = (text: string) => text.replace(/\s+/g, " ").trim();
 
+/** Цена тейка есть в цитате: 78250 это и «$78,250», и «$78.25K» */
+const hasLevel = ({ level, evidence_quote }: Criterion) => {
+  const digits = evidence_quote.replace(/\D/g, "");
+  return [level, level / 1000].some((value) => digits.includes(String(value).replace(".", "")));
+};
+
 const toCriteriaMessage = (criteria: Criterion[]) => ({
   role: "user" as const,
   content: `Критерии:\n${JSON.stringify(criteria, null, 2)}`,
@@ -193,7 +199,7 @@ export class AgentUtils {
     }),
   });
 
-  /** Агент 1. Id критерия уникален между статьями */
+  /** Агент 1. Id тейка уникален между статьями, в один день их бывает несколько */
   public getCriteria = async (article: Article): Promise<CriteriaAnswer> => {
     const answer = await generateObject(
       {
@@ -207,8 +213,8 @@ export class AgentUtils {
     return {
       ...answer,
       criteria: answer.criteria
-        .filter(({ evidence_quote }) => text.includes(squash(evidence_quote)))
-        .map((criterion) => ({ ...criterion, id: `${article.when}-${criterion.id}` })),
+        .filter((criterion) => text.includes(squash(criterion.evidence_quote)) && hasLevel(criterion))
+        .map((criterion) => ({ ...criterion, id: `${article.id.slice(0, 8)}-${criterion.id}` })),
     };
   };
 

@@ -9,6 +9,7 @@ const ROOT_PATH_SYMBOL = Symbol.for("root_path");
 const DAY_MS = 24 * 60 * 60 * 1000;
 /** Обзор действует 7 дней, новый обзор заменяет его и сбрасывает отсчёт */
 const ARTICLE_TTL_DAYS = 7;
+const BTC_TITLE = /bitcoin|btc/i;
 
 interface Article {
   id: string;
@@ -85,6 +86,10 @@ export class DatasetUtils {
         continue;
       }
       const article: Article = JSON.parse(line);
+      // Статья про другой актив не должна заменять действующую статью про BTC
+      if (!BTC_TITLE.test(article.messages[0].content.split("\n")[0])) {
+        continue;
+      }
       const key = toDateKey(new Date(article.publishedAt));
       const ref: LineRef = { offset, length: buffer.length };
       const refs = this._indexMap.get(key);

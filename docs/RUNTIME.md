@@ -71,7 +71,7 @@ curl -s http://localhost:10050/api/v1/health | jq
 |---|---|
 | `OLLAMA_HOST` | `https://ollama.com` |
 | `OLLAMA_API_KEY` | ключ с https://ollama.com/settings/keys |
-| `OLLAMA_MODEL` | `minimax-m3:cloud` |
+| `OLLAMA_MODEL` | `deepseek-v4.1-flash` |
 | `OLLAMA_VISION` | `1`, картинки из сообщений `user` уходят модели, `read_file` показывает ей картинки из файлов |
 
 Файл `.env` с ключом в git не попадает. Остальные настройки описаны в README agent-runtime, раздел Configuration.
