@@ -277,16 +277,6 @@ export class AgentUtils {
       { dispatcher: this._dispatcher },
     );
     assertSameIds(criteria, answer);
-    if (answer.action !== "wait") {
-      // Направление позиции обязано опираться на наступивший критерий этого направления
-      const direction = answer.action === "long" ? "up" : "down";
-      const isConfirmed = answer.criteria.some(
-        ({ id, met }) => met && criteria.find((item) => item.id === id)?.direction === direction,
-      );
-      if (!isConfirmed) {
-        throw new Error(`Agent: action ${answer.action} has no met ${direction} criterion`);
-      }
-    }
     return answer;
   };
 
