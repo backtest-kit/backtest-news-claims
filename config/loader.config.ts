@@ -1,4 +1,3 @@
-import { waitForInit } from "@backtest-kit/mongo";
 import {
   Launcher,
   listenError,
@@ -27,7 +26,3 @@ listenError((error) => {
     message: getErrorMessage(error),
   });
 });
-
-export default async () => {
-  await waitForInit();
-}
