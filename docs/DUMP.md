@@ -17,9 +17,9 @@ dump/
 │   └── log.jsonl           ответы агентов из Log.info
 └── data/
     ├── measure/            кэш ответов агентов
-    │   ├── agent1_v2_1d_0/
-    │   ├── agent2_v2_4h_1/
-    │   ├── agent3_v2_4h_2/
+    │   ├── agent1_v1_1d_0/
+    │   ├── agent2_v1_4h_1/
+    │   ├── agent3_v1_4h_2/
     │   └── agent4_v1_1d_3/
     ├── candle/ccxt-exchange/BTCUSDT/  кэш свечей
     │   ├── 1d/
@@ -86,12 +86,12 @@ dump/
 
 | Папка | Имя файла | `data` |
 |---|---|---|
-| `agent1_v2_1d_0` | `BTCUSDT_<id статьи>.json` | `criteria`, `description`, `reasoning` |
-| `agent2_v2_4h_1` | `BTCUSDT_<время в мс>.json` | `criteria`, `action`, `description`, `reasoning` |
-| `agent3_v2_4h_2` | `BTCUSDT_<время в мс>_<id сигнала>.json` | `criteria`, `action`, `description`, `reasoning` |
+| `agent1_v1_1d_0` | `BTCUSDT_<id статьи>.json` | `criteria`, `description`, `reasoning` |
+| `agent2_v1_4h_1` | `BTCUSDT_<время в мс>.json` | `criteria`, `action`, `description`, `reasoning` |
+| `agent3_v1_4h_2` | `BTCUSDT_<время в мс>_<id сигнала>.json` | `criteria`, `action`, `description`, `reasoning` |
 | `agent4_v1_1d_3` | `BTCUSDT_<id статьи>_<id сигнала>.json` | `forecast`, `evidence_quote`, `action`, `description`, `reasoning` |
 
-При повторном прогоне ответы берутся отсюда, запросов к модели нет. Чтобы получить новые ответы, удалите нужную папку или смените `name` в `Cache.file`.
+При повторном прогоне ответы берутся отсюда, запросов к модели нет. Чтобы получить новые ответы, удалите нужную папку. Чтобы сохранить старые, скопируйте её в `./tmp` проекта.
 
 ## 5. Свечи: `data/candle/`
 
@@ -127,5 +127,5 @@ jq -r '[.createdAt, .topic, .args[0]] | @tsv' log/log.jsonl
 Найденные критерии:
 
 ```bash
-jq -c '.data.criteria[]' data/measure/agent1_v2_1d_0/*.json
+jq -c '.data.criteria[]' data/measure/agent1_v1_1d_0/*.json
 ```

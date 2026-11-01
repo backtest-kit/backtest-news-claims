@@ -33,7 +33,7 @@ const getCriteria = Cache.file(
   async (_symbol: string, article: Article) => Agent.getCriteria(article),
   {
     interval: "1d",
-    name: "agent1_v2",
+    name: "agent1_v1",
     key: ([symbol, , article]) => `${symbol}_${article.id}`,
   },
 );
@@ -43,7 +43,7 @@ const getEntry = Cache.file(
     Agent.getEntry(symbol, article, criteria, when),
   {
     interval: "4h",
-    name: "agent2_v2",
+    name: "agent2_v1",
   },
 );
 
@@ -57,7 +57,7 @@ const getExit = Cache.file(
   ) => Agent.getExit(symbol, signal, article, criteria, when),
   {
     interval: "4h",
-    name: "agent3_v2",
+    name: "agent3_v1",
     key: ([symbol, alignMs, signal]) => `${symbol}_${alignMs}_${signal.id}`,
   },
 );
