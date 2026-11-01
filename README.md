@@ -75,16 +75,6 @@ Every answer also carries `description`, shown in the backtest-kit UI, and `reas
 
 Code stays out of trading decisions. It feeds data and executes answers. It also checks each answer against its schema, drops any claim whose price is missing from a verbatim quote, and caches answers.
 
-
-## 🗂️ Data
-
-The articles come from the [investinglive-crypto](https://huggingface.co/datasets/tripolskypetr/investinglive-crypto) dataset: 202 articles from [investingLive](https://investinglive.com) with publication times, of which BTC-titled articles are used.
-
-- **Coverage:** 2 to 9 BTC articles per month in 2025 and 4 to 14 in 2026. Thin months give weak conclusions.
-
-Candles come from Binance spot through `ccxt`. Authors sometimes name CME futures levels, which can differ slightly from spot.
-
-
 ## 📜 Summary
 
 | Aspect | This repo |
