@@ -27,7 +27,7 @@ const CANDLES: { interval: CandleInterval; limit: number }[] = [
 const Agent1Format = defineFormat({
   type: "object",
   additionalProperties: false,
-  required: ["criteria"],
+  required: ["criteria", "description", "reasoning"],
   properties: {
     criteria: {
       type: "array",
@@ -45,51 +45,81 @@ const Agent1Format = defineFormat({
         },
       },
     },
+    description: {
+      type: "string",
+      minLength: 1,
+      description: "Понятное описание решения для человека, показывается в интерфейсе",
+    },
+    reasoning: {
+      type: "string",
+      minLength: 1,
+      description: "Каких данных не хватило для ответа. Если хватило всех, так и напиши",
+    },
   },
 });
 
 const Agent2Format = defineFormat({
   type: "object",
   additionalProperties: false,
-  required: ["criteria", "action"],
+  required: ["criteria", "action", "description", "reasoning"],
   properties: {
     criteria: {
       type: "array",
       items: {
         type: "object",
         additionalProperties: false,
-        required: ["id", "met", "level_tests", "reasoning"],
+        required: ["id", "met", "level_tests", "evidence"],
         properties: {
           id: { type: "string" },
           met: { type: "boolean" },
           level_tests: { type: ["integer", "null"], description: "Сколько раз цена тестировала уровень" },
-          reasoning: { type: "string", minLength: 1 },
+          evidence: { type: "string", minLength: 1, description: "Обоснование по данным" },
         },
       },
     },
     action: { enum: ["long", "short", "wait"] },
+    description: {
+      type: "string",
+      minLength: 1,
+      description: "Понятное описание решения для человека, показывается в интерфейсе",
+    },
+    reasoning: {
+      type: "string",
+      minLength: 1,
+      description: "Каких данных не хватило для ответа. Если хватило всех, так и напиши",
+    },
   },
 });
 
 const Agent3Format = defineFormat({
   type: "object",
   additionalProperties: false,
-  required: ["criteria", "action"],
+  required: ["criteria", "action", "description", "reasoning"],
   properties: {
     criteria: {
       type: "array",
       items: {
         type: "object",
         additionalProperties: false,
-        required: ["id", "relevant", "reasoning"],
+        required: ["id", "relevant", "evidence"],
         properties: {
           id: { type: "string" },
           relevant: { type: "boolean" },
-          reasoning: { type: "string", minLength: 1 },
+          evidence: { type: "string", minLength: 1, description: "Обоснование по данным" },
         },
       },
     },
     action: { enum: ["hold", "close"] },
+    description: {
+      type: "string",
+      minLength: 1,
+      description: "Понятное описание решения для человека, показывается в интерфейсе",
+    },
+    reasoning: {
+      type: "string",
+      minLength: 1,
+      description: "Каких данных не хватило для ответа. Если хватило всех, так и напиши",
+    },
   },
 });
 
@@ -105,7 +135,8 @@ interface Article {
   }[];
 }
 
-export type Criterion = InferFormat<typeof Agent1Format>["criteria"][number];
+export type CriteriaAnswer = InferFormat<typeof Agent1Format>;
+export type Criterion = CriteriaAnswer["criteria"][number];
 export type EntryAnswer = InferFormat<typeof Agent2Format>;
 export type ExitAnswer = InferFormat<typeof Agent3Format>;
 
@@ -171,8 +202,8 @@ export class AgentUtils {
   });
 
   /** Агент 1. Id критерия уникален между статьями */
-  public getCriteria = async (article: Article): Promise<Criterion[]> => {
-    const { criteria } = await generateObject(
+  public getCriteria = async (article: Article): Promise<CriteriaAnswer> => {
+    const answer = await generateObject(
       {
         messages: article.messages,
         instructions: await renderMustache(getPromptPath("agent1")),
@@ -181,9 +212,12 @@ export class AgentUtils {
       { dispatcher: this._dispatcher },
     );
     const text = squash(article.messages.map(({ content }) => content).join("\n"));
-    return criteria
-      .filter(({ evidence_quote }) => text.includes(squash(evidence_quote)))
-      .map((criterion) => ({ ...criterion, id: `${article.when}-${criterion.id}` }));
+    return {
+      ...answer,
+      criteria: answer.criteria
+        .filter(({ evidence_quote }) => text.includes(squash(evidence_quote)))
+        .map((criterion) => ({ ...criterion, id: `${article.when}-${criterion.id}` })),
+    };
   };
 
   /** Агент 2 */

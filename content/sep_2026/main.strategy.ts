@@ -6,6 +6,7 @@ import {
   commitCreateSignal,
   listenActivePing,
   listenIdlePing,
+  Log,
   Position,
   type IPublicSignalRow,
 } from "backtest-kit";
@@ -69,11 +70,13 @@ listenIdlePing(async ({ symbol, when, currentPrice }) => {
   if (!article) {
     return;
   }
-  const criteria = await getCriteria(symbol, article);
+  const { criteria, reasoning } = await getCriteria(symbol, article);
+  Log.info("agent1", `${article.when}: ${criteria.length} критериев, не хватило: ${reasoning}`);
   if (!criteria.length) {
     return;
   }
   const answer = await getEntry(symbol, article, criteria, when);
+  Log.info("agent2", `${when.toISOString()}: ${answer.action}, не хватило: ${answer.reasoning}`);
   if (answer.action === "wait") {
     return;
   }
@@ -83,22 +86,25 @@ listenIdlePing(async ({ symbol, when, currentPrice }) => {
       currentPrice,
       percentStopLoss: HARD_STOP_PERCENT,
     }),
-    payload: { articleId: article.id, criteria },
-    note: JSON.stringify({ when: article.when, criteria, answer }, null, 2),
+    payload: { articleId: article.id, criteria, answer },
+    note: answer.description,
   });
 });
 
 listenActivePing(async ({ symbol, when, data }) => {
   const article = await Dataset.getArticle(when);
   if (article && !(await Agent.getPosition()).articleIds.includes(article.id)) {
-    await Agent.addCriteria(article.id, await getCriteria(symbol, article));
+    const answer = await getCriteria(symbol, article);
+    Log.info("agent1", `${article.when}: ${answer.criteria.length} критериев, не хватило: ${answer.reasoning}`);
+    await Agent.addCriteria(article.id, answer.criteria);
   }
   const { criteria } = await Agent.getPosition();
   const answer = await getExit(symbol, data, article, criteria, when);
+  Log.info("agent3", `${when.toISOString()}: ${answer.action}, не хватило: ${answer.reasoning}`);
   await Agent.addAnswer(answer, when);
   if (answer.action === "close") {
     await commitClosePending(symbol, {
-      note: JSON.stringify({ when: when.toISOString(), answer }, null, 2),
+      note: answer.description,
     });
   }
 });
